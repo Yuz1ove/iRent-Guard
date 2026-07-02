@@ -4,7 +4,7 @@ const navItems = [
   { href: "/", label: "首頁", icon: Home },
   { href: "/client", label: "客戶端", icon: Smartphone },
   { href: "/company", label: "公司端", icon: Building2 },
-  { href: "/company/ops-dashboard", label: "營運儀表板", icon: Gauge },
+  { href: "/company/ops-dashboard", label: "營運儀表板", mobileLabel: "儀表板", icon: Gauge },
   { href: "/company/customer-service", label: "客服摘要", icon: Headphones }
 ];
 
@@ -28,9 +28,16 @@ export function AppHeader() {
             pathname === item.href ||
             (item.href === "/client" && pathname.startsWith("/client/"));
           return (
-            <a className={active ? "active" : ""} href={item.href} key={item.href}>
+            <a aria-label={item.label} className={active ? "active" : ""} href={item.href} key={item.href}>
               <Icon size={17} />
-              {item.label}
+              {item.mobileLabel ? (
+                <>
+                  <span className="nav-label-full">{item.label}</span>
+                  <span aria-hidden="true" className="nav-label-mobile">{item.mobileLabel}</span>
+                </>
+              ) : (
+                <span>{item.label}</span>
+              )}
             </a>
           );
         })}

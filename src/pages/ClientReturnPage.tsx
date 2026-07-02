@@ -2,7 +2,7 @@ import React from "react";
 import { ArrowLeft, ArrowRight, Camera, Check, FlaskConical, Images, Mic, RotateCcw, Send } from "lucide-react";
 import { buildEmptySubmission, photoAngleLabels, requiredPhotoAngles } from "../data/clientSubmissions";
 import { clientPreCheck } from "../lib/assessmentEngine";
-import { fetchAiPrecheck, inspectCustomerPhotos, postDemoSubmission, runPhotoAiSmokeTest } from "../lib/demoApi";
+import { CUSTOMER_PHOTO_INSPECTION_ERROR_MESSAGE, fetchAiPrecheck, inspectCustomerPhotos, postDemoSubmission, runPhotoAiSmokeTest } from "../lib/demoApi";
 import type { PhotoAiSmokeTestResult } from "../lib/demoApi";
 import type { ClientPhotoAngle, ClientPhotoStatus, ClientReturnSubmission } from "../types/client";
 import type { ExpectedVehicleView, FinalPhotoInspectionResult } from "../types/photoInspection";
@@ -111,6 +111,7 @@ export function ClientReturnPage() {
         };
       });
     } catch (error) {
+      console.warn("[client-photo-inspection] failed", error);
       setSubmission((current) => ({
         ...current,
         photos: current.photos.map((photo) =>
@@ -118,7 +119,7 @@ export function ClientReturnPage() {
             ? {
                 ...photo,
                 status: "uploaded",
-                aiHint: error instanceof Error ? `AI 檢核失敗，請重試：${error.message}` : "AI 檢核失敗，請重試。",
+                aiHint: CUSTOMER_PHOTO_INSPECTION_ERROR_MESSAGE,
                 aiInspection: null,
                 aiInspectionRaw: null
               }
@@ -203,7 +204,8 @@ export function ClientReturnPage() {
       }));
       setPhotoBatchMessage(result.customerMessage || result.final_decision.customer_message);
     } catch (error) {
-      const message = error instanceof Error ? `AI 檢核失敗，請重試：${error.message}` : "AI 檢核失敗，請重試。";
+      console.warn("[client-photo-batch-inspection] failed", error);
+      const message = CUSTOMER_PHOTO_INSPECTION_ERROR_MESSAGE;
       setPhotoBatchMessage(message);
       setSubmission((current) => ({
         ...current,
@@ -457,7 +459,8 @@ function PhotoAiSmokeTestPanel() {
     try {
       setResult(await runPhotoAiSmokeTest({ file, expectedView }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "AI smoke test 失敗");
+      console.warn("[photo-ai-smoke-test] failed", err);
+      setError(CUSTOMER_PHOTO_INSPECTION_ERROR_MESSAGE);
     } finally {
       setLoading(false);
     }

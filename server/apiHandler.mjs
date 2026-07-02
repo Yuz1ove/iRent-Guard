@@ -10,7 +10,12 @@ import {
   savePhotoInspectionRecord
 } from "./demoStore.mjs";
 import { assessPhotoEvidence } from "./photoEvidence.mjs";
-import { inspectCustomerPhotos, inspectPhotoAiSmokeTest } from "./photoInspection.mjs";
+import {
+  describePhotoInspectionError,
+  getCustomerPhotoInspectionPublicError,
+  inspectCustomerPhotos,
+  inspectPhotoAiSmokeTest
+} from "./photoInspection.mjs";
 import { checkLlmHealth } from "./llmProvider.mjs";
 import { readMultipartForm } from "./multipartForm.mjs";
 
@@ -56,9 +61,10 @@ export async function handleApiRequest(req, res) {
         savePhotoInspectionRecord(body, result);
         return sendJson(res, 200, { ok: true, data: result });
       } catch (error) {
+        console.error("[customer-photo-inspection] failed", describePhotoInspectionError(error));
         return sendJson(res, error?.statusCode || 400, {
           ok: false,
-          error: error instanceof Error ? error.message : "Unknown customer photo inspection error"
+          error: getCustomerPhotoInspectionPublicError()
         });
       }
     }
