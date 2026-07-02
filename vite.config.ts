@@ -3,6 +3,12 @@ import react from "@vitejs/plugin-react";
 import { handleApiRequest } from "./server/apiHandler.mjs";
 
 export default defineConfig({
+  server: {
+    allowedHosts: [".lhr.life", ".loca.lt"]
+  },
+  preview: {
+    allowedHosts: [".lhr.life", ".loca.lt"]
+  },
   plugins: [
     react(),
     {
