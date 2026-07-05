@@ -1,4 +1,8 @@
-import { inspectCustomerPhotos } from "../../server/photoInspection.mjs";
+import {
+  describePhotoInspectionError,
+  getCustomerPhotoInspectionPublicError,
+  inspectCustomerPhotos
+} from "../../server/photoInspection.mjs";
 import { savePhotoInspectionRecord, send } from "../_utils.js";
 
 export default async function handler(req, res) {
@@ -10,10 +14,10 @@ export default async function handler(req, res) {
     savePhotoInspectionRecord(body, result);
     return send(res, 200, { ok: true, data: result });
   } catch (error) {
-    console.error("[customer-photo-inspection] failed", error);
+    console.error("[customer-photo-inspection] failed", describePhotoInspectionError(error));
     return send(res, error?.statusCode || 400, {
       ok: false,
-      error: error instanceof Error ? error.message : "Unknown customer photo inspection error"
+      error: getCustomerPhotoInspectionPublicError()
     });
   }
 }

@@ -283,7 +283,16 @@ function buildAssessment(submission) {
   const hasExisting = /原本就有|取車前|不是我|已經有/.test(text);
   const hasSafety = /胎壓|警示燈|故障燈|煞車/.test(text);
   const hasClean = /垃圾|髒|飲料|煙味|異味/.test(text);
-  const riskScore = Math.min(100, (hasDamage ? 32 : 6) + (hasExisting ? 12 : 0) + (hasSafety ? 28 : 0) + (hasClean ? 10 : 0));
+  const projectedNextBookingMinutes = hasDamage || hasSafety ? 35 : 80;
+  const lineItems = buildRiskLineItems(submission, {
+    hasDamage,
+    hasExisting,
+    hasSafety,
+    hasClean,
+    nextBookingMinutes: projectedNextBookingMinutes
+  });
+  const formula = buildRiskFormula(lineItems);
+  const riskScore = formula.finalRisk;
   const riskLevel = riskScore >= 60 ? "high" : riskScore >= 30 ? "medium" : "low";
   return {
     riskScore,
@@ -294,7 +303,10 @@ function buildAssessment(submission) {
       cleanliness: hasClean ? 8 : 0,
       energy: 0,
       safety: hasSafety ? 24 : 0,
-      dispute: hasExisting ? 8 : 0
+      dispute: hasExisting ? 8 : 0,
+      lineItems,
+      formula,
+      scoreDisclaimer: "Demo 模擬分數，非正式判責結果"
     },
     nextBookingDecision: riskLevel === "high" ? "reassign" : riskLevel === "medium" ? "delay" : "keep",
     dispatchPriority: riskLevel === "high" ? "high" : riskLevel === "medium" ? "medium" : "low",
@@ -302,17 +314,83 @@ function buildAssessment(submission) {
     confidence: hasExisting ? 0.78 : 0.91,
     manualReviewRequired: hasDamage || hasExisting || hasSafety,
     internalReasoning: hasDamage
-      ? "租客描述包含右側/右前車身刮傷訊號，需比對照片、歷史工單與下一筆訂單時間。"
-      : "未觸發主要車況風險規則。",
+      ? "LLM 推理摘要：輸入已記錄右側/右前車身刮傷訊號，需比對照片、歷史工單與下一筆訂單時間。"
+      : "LLM 推理摘要：未觸發主要車況風險規則。",
     customerSafeMessage: hasDamage
       ? "系統已收到您的車況說明，將提供營運人員後續覆核。若為取車前已存在，請補充時間、位置或可辨識描述。"
       : "還車紀錄已送出，系統初步檢查未發現需補拍項目。",
     customerSummary: hasDamage
       ? `您好，訂單 ${submission.orderId} 的還車資料已收到。系統會保留照片與備註紀錄，後續以人工覆核確認，不會在資訊不足時直接判定責任。`
       : `您好，訂單 ${submission.orderId} 已完成還車資料送出，系統將保留紀錄供後續查閱。`,
-    internalSummary: `${submission.vehicleId} 共享 demo case 已建立，風險 ${riskScore}/100，建議 ${riskLevel === "high" ? "改派下一筆訂單並人工覆核" : riskLevel === "medium" ? "補拍/確認後再出租" : "保留下一筆訂單"}。`,
+    internalSummary: `${submission.vehicleId} 共享 demo case 已建立，Demo 模擬風險 ${riskScore}/100（原始累積 ${formula.rawScore}），建議 ${riskLevel === "high" ? "改派下一筆訂單並人工覆核" : riskLevel === "medium" ? "補拍/確認後再出租" : "保留下一筆訂單"}。`,
     validation: { valid: true, errors: [] }
   };
+}
+
+function buildRiskLineItems(submission, signals) {
+  const hasMissingPhoto =
+    submission.photoSlots.length === 0 ||
+    submission.photoSlots.some((slot) => slot.status === "missing" || slot.status === "retake_required");
+  const items = [
+    makeRiskItem("base-review", "基礎流程檢核", "每筆 shared demo case 都建立公司端覆核紀錄與 evidence trail。", 6, "baseScore")
+  ];
+
+  if (hasMissingPhoto) {
+    items.push(makeRiskItem("photo-missing", "照片缺漏", "客戶端照片尚未完整通過，需提高補拍優先序。", 20, "photoRisk"));
+  }
+  if (signals.hasDamage) {
+    items.push(makeRiskItem("note-damage-keywords", "損傷關鍵字", "備註包含刮傷、右側、右前或保險桿等損傷訊號。", 25, "noteRisk", "damage"));
+  }
+  if (signals.hasClean) {
+    items.push(makeRiskItem("cleanliness-risk", "髒污標記", "備註包含垃圾、髒污、飲料、煙味或異味。", 15, "photoRisk", "cleanliness"));
+  }
+  if (signals.hasSafety) {
+    items.push(makeRiskItem("safety-risk", "安全 / 車聯網警示", "備註包含胎壓、警示燈、故障燈或煞車訊號。", 28, "noteRisk", "safety"));
+  }
+  if (signals.hasExisting) {
+    items.push(makeRiskItem("dispute-risk", "爭議 / 歷史訊號", "備註提到取車前可能已存在或非本次造成，需人工比對。", 12, "noteRisk", "dispute"));
+  }
+
+  const orderPressureRisk = signals.nextBookingMinutes < 45 ? 20 : signals.nextBookingMinutes < 90 ? 8 : 0;
+  if (orderPressureRisk > 0) {
+    items.push(makeRiskItem("next-booking-pressure", "下一筆訂單壓力", `${signals.nextBookingMinutes} 分鐘後有下一筆訂單，需保留調度緩衝。`, orderPressureRisk, "orderPressureRisk"));
+  }
+
+  if (signals.hasExisting && submission.damageNote.replace(/\s+/g, "").length >= 10) {
+    items.push(makeRiskItem("customer-clarification", "客戶補充說明", "租客補充取車前狀況，可降低直接升級派工風險。", -10, "mitigationScore", "dispute"));
+  }
+
+  return items;
+}
+
+function buildRiskFormula(items) {
+  const sumPositive = (component) =>
+    items
+      .filter((item) => item.component === component)
+      .reduce((total, item) => total + Math.max(0, item.points), 0);
+  const baseScore = sumPositive("baseScore");
+  const photoRisk = sumPositive("photoRisk");
+  const noteRisk = sumPositive("noteRisk");
+  const orderPressureRisk = sumPositive("orderPressureRisk");
+  const mitigationScore = items
+    .filter((item) => item.component === "mitigationScore")
+    .reduce((total, item) => total + Math.abs(Math.min(0, item.points)), 0);
+  const rawScore = baseScore + photoRisk + noteRisk + orderPressureRisk - mitigationScore;
+  const finalRisk = Math.max(0, Math.min(100, rawScore));
+  return {
+    baseScore,
+    photoRisk,
+    noteRisk,
+    orderPressureRisk,
+    mitigationScore,
+    rawScore,
+    finalRisk,
+    clamped: rawScore !== finalRisk
+  };
+}
+
+function makeRiskItem(id, label, description, points, component, category) {
+  return { id, label, description, points, component, category };
 }
 
 function buildActions(assessment) {

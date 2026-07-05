@@ -1,6 +1,7 @@
 import type { CaseAssessment } from "../types/assessment";
 import { decisionLabels, minutesLabel } from "../lib/formatters";
 import { PriorityBadge, StatusBadge } from "./StatusBadge";
+import type { KeyboardEvent } from "react";
 
 interface VehicleTableProps {
   rows: CaseAssessment[];
@@ -11,6 +12,12 @@ interface VehicleTableProps {
 }
 
 export function VehicleTable({ rows, selectedId, onSelect, descending, onToggleSort }: VehicleTableProps) {
+  function handleRowKeyDown(event: KeyboardEvent<HTMLTableRowElement>, id: string) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    onSelect(id);
+  }
+
   return (
     <div className="table-shell">
       <table className="vehicle-table">
@@ -41,9 +48,14 @@ export function VehicleTable({ rows, selectedId, onSelect, descending, onToggleS
         <tbody>
           {rows.map(({ returnCase, assessment }) => (
             <tr
+              aria-label={`查看 ${returnCase.vehicleId} 案件詳情`}
+              aria-selected={returnCase.id === selectedId}
               className={returnCase.id === selectedId ? "active" : ""}
               key={returnCase.id}
               onClick={() => onSelect(returnCase.id)}
+              onKeyDown={(event) => handleRowKeyDown(event, returnCase.id)}
+              role="button"
+              tabIndex={0}
             >
               <td className="vehicle-cell">
                 <strong>{returnCase.vehicleId}</strong>

@@ -1,12 +1,15 @@
+import React from "react";
 import { ArrowRight, Building2, Car, ClipboardCheck, Headphones, Smartphone, Workflow } from "lucide-react";
+import { fetchLlmHealth } from "../lib/demoApi";
+import type { PublicLlmHealthSnapshot } from "../lib/demoApi";
 
 const flow = [
-  "租客還車 App",
-  "ClientReturnSubmission",
-  "AI Pre-check",
-  "CompanyReturnCase",
-  "Assessment Engine",
-  "Ops / CS / Work Orders"
+  "租客還車應用",
+  "客戶端還車資料",
+  "AI 初步檢核",
+  "公司端還車案件",
+  "風險評估引擎",
+  "營運、客服與工單"
 ];
 
 const demoSteps = [
@@ -17,7 +20,44 @@ const demoSteps = [
   "工單頁查看派工結果"
 ];
 
+type AiMode = "formal" | "demo" | "fallback";
+
+const riskSourcePreview = [
+  "照片缺漏 +20",
+  "損傷關鍵字 +25",
+  "髒污標記 +15",
+  "下一筆訂單壓力 +20",
+  "客戶補充說明 -10"
+];
+
+const publicReasoningSummary = [
+  "偵測輸入是否完整",
+  "比對照片部位是否缺漏",
+  "根據備註判斷是否可能有爭議",
+  "產生公司端摘要與下一步建議"
+];
+
 export function LandingPage() {
+  const [llmHealth, setLlmHealth] = React.useState<PublicLlmHealthSnapshot | null>(null);
+
+  React.useEffect(() => {
+    let alive = true;
+    fetchLlmHealth()
+      .then((health) => {
+        if (alive) setLlmHealth(health);
+      })
+      .catch(() => {
+        if (alive) setLlmHealth(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const aiMode = resolveAiMode(llmHealth);
+  const modeMeta = aiModeMetadata[aiMode];
+  const aiCheckLabel = aiMode === "formal" ? "正式 AI 檢核" : aiMode === "fallback" ? "規則引擎 fallback" : "Demo 模擬檢核";
+
   return (
     <main className="page landing-page">
       <section className="hero-section brand-hero">
@@ -37,6 +77,45 @@ export function LandingPage() {
         <div className="hero-device-board" aria-label="雙端流程示意">
           <div className="mini-phone"><Smartphone size={32} /><strong>租客還車</strong><span>照片 / 備註 / 補拍提醒</span></div>
           <div className="mini-console"><Car size={32} /><strong>公司稽核</strong><span>風險 / 派工 / 客服摘要</span></div>
+          <article className="architecture-flow-card">
+            <div className="architecture-card-top">
+              <Workflow size={24} />
+              <span className={`ai-mode-badge ${aiMode}`}>{modeMeta.badge}</span>
+            </div>
+            <h2>運算架構與 LLM 推理流程</h2>
+            <p className="architecture-subtitle">照片檢核 / 規則加權 / LLM 摘要 / 派工決策</p>
+            <p>
+              系統將客戶照片、備註、車況標記與下一筆訂單壓力整合，先由規則引擎完成可解釋風險加權，再交由 LLM 產生客服摘要與派工建議。若正式 AI provider 尚未設定，頁面會明確標示為 Demo 模擬，不會假裝成真實判定。
+            </p>
+            <div className="architecture-step-list">
+              <section>
+                <strong>Step 1 客戶端輸入</strong>
+                <span>還車照片、文字 / 語音備註、車輛、時間與下一筆訂單資訊。</span>
+              </section>
+              <section>
+                <strong>Step 2 AI / 規則檢核</strong>
+                <span>{aiCheckLabel}：{modeMeta.description}</span>
+              </section>
+              <section>
+                <strong>Step 3 風險分數生成</strong>
+                <span>分數來源可解釋，Demo 模擬分數非正式判責結果。</span>
+                <div className="risk-source-chips">
+                  {riskSourcePreview.map((item) => <small key={item}>{item}</small>)}
+                </div>
+              </section>
+              <section>
+                <strong>Step 4 公司端輸出</strong>
+                <span>風險等級、是否補拍、是否派工、客服摘要與下一筆訂單處理建議。</span>
+              </section>
+            </div>
+            <div className="reasoning-summary">
+              <strong>可公開的推理摘要</strong>
+              <ul>
+                {publicReasoningSummary.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            </div>
+            <p className="architecture-note">Demo 分數僅用於展示流程；正式環境需保存照片、模型回傳、規則加權與人工覆核紀錄。</p>
+          </article>
         </div>
       </section>
 
@@ -67,7 +146,7 @@ export function LandingPage() {
 
       <section className="panel-section">
         <div className="section-heading">
-          <p className="eyebrow">Data flow</p>
+          <p className="eyebrow">雙端同步</p>
           <h2>雙端資料流</h2>
         </div>
         <div className="flow-diagram">
@@ -88,4 +167,26 @@ export function LandingPage() {
       </section>
     </main>
   );
+}
+
+const aiModeMetadata: Record<AiMode, { badge: string; description: string }> = {
+  formal: {
+    badge: "正式 AI 檢核中",
+    description: "SCHOOL_LLM 或正式 provider 已可用，模型回傳會納入照片檢核與摘要。"
+  },
+  demo: {
+    badge: "Demo 模擬推理",
+    description: "尚未設定 SCHOOL_LLM_API_KEY、SCHOOL_LLM_BASE_URL、SCHOOL_LLM_MODEL，僅展示 Demo 流程。"
+  },
+  fallback: {
+    badge: "規則引擎 fallback",
+    description: "AI provider 設定不完整或暫時不可用，目前只採用可解釋規則引擎。"
+  }
+};
+
+function resolveAiMode(health: PublicLlmHealthSnapshot | null): AiMode {
+  if (!health) return "demo";
+  if (health.available && health.status === "ok") return "formal";
+  if (health.configurationState === "partial" || health.status === "unauthorized" || health.status === "error") return "fallback";
+  return "demo";
 }

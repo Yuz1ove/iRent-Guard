@@ -23,12 +23,17 @@ export function ReturnReviewPage() {
   const [copied, setCopied] = React.useState(false);
   const [jsonOpen, setJsonOpen] = React.useState(false);
   const [toast, setToast] = React.useState("");
+  const [analysisState, setAnalysisState] = React.useState<"idle" | "loading" | "complete">("idle");
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [finalizeState, setFinalizeState] = React.useState<"idle" | "loading" | "complete">("idle");
 
   React.useEffect(() => {
     setDraftSubmission(baseCase.submission);
     setPhotoUploaded(false);
     setCopied(false);
     setToast("");
+    setAnalysisState("idle");
+    setFinalizeState("idle");
   }, [baseCase]);
 
   React.useEffect(() => {
@@ -74,14 +79,20 @@ export function ReturnReviewPage() {
   function handlePhoto(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+    event.currentTarget.value = "";
     setPhotoUploaded(true);
     setToast("照片已納入公司端重新分析");
     window.setTimeout(() => setToast(""), 1600);
   }
 
   function reAnalyze() {
-    setToast(`已重新分析，風險分數 ${assessment.riskScore}`);
-    window.setTimeout(() => setToast(""), 1600);
+    setAnalysisState("loading");
+    window.setTimeout(() => {
+      setAnalysisState("complete");
+      setToast(`已重新分析，風險分數 ${assessment.riskScore}`);
+      window.setTimeout(() => setAnalysisState("idle"), 1800);
+      window.setTimeout(() => setToast(""), 1600);
+    }, 420);
   }
 
   async function copySummary() {
@@ -95,11 +106,21 @@ export function ReturnReviewPage() {
   }
 
   async function finalizeDecision() {
+    setFinalizeState("loading");
     if (companyCase.submission.submissionId.startsWith("CASE-")) {
       await patchDemoCase(companyCase.submission.submissionId, { status: "under_review" });
       await refreshLatestCase();
     }
+    setFinalizeState("complete");
     setToast("已送出最終判定");
+  }
+
+  async function refreshCases() {
+    setRefreshing(true);
+    await refreshLatestCase();
+    setRefreshing(false);
+    setToast("案件資料已重新整理");
+    window.setTimeout(() => setToast(""), 1500);
   }
 
   return (
@@ -110,11 +131,11 @@ export function ReturnReviewPage() {
           <h1>公司端單筆還車稽核工作台</h1>
         </div>
         <div className="title-actions">
-          <button className="secondary-button" onClick={reAnalyze} type="button">
-            <RefreshCcw size={18} /> 重新分析
+          <button className={`secondary-button ${analysisState === "complete" ? "selected" : ""}`} disabled={analysisState === "loading"} onClick={reAnalyze} type="button">
+            <RefreshCcw size={18} /> {analysisState === "loading" ? "分析中" : analysisState === "complete" ? "已重新分析" : "重新分析"}
           </button>
-          <button className="secondary-button" onClick={() => void refreshLatestCase()} type="button">
-            <RefreshCcw size={18} /> 重新整理案件
+          <button className="secondary-button" disabled={refreshing} onClick={() => void refreshCases()} type="button">
+            <RefreshCcw size={18} /> {refreshing ? "整理中" : "重新整理案件"}
           </button>
           <button className="primary-button" onClick={() => setJsonOpen(true)} type="button">
             <Download size={18} /> 匯出 JSON
@@ -128,16 +149,16 @@ export function ReturnReviewPage() {
         <div><span>車號</span><strong>{draftSubmission.vehicleId}</strong></div>
         <div><span>還車站點</span><strong>{draftSubmission.returnStation}</strong></div>
         <div><span>下一筆訂單</span><strong>{minutesLabel(companyCase.bookingContext.nextBookingMinutes)}</strong></div>
-        <div><span>AI 狀態</span><StatusBadge status={assessment.status} /></div>
+        <div><span>AI 輔助稽核</span><StatusBadge status={assessment.status} /></div>
         <div><span>人工覆核</span><strong>{assessment.manualReviewRequired ? "需要" : "不需要"}</strong></div>
-        <button className="primary-button" onClick={() => void finalizeDecision()} type="button">
-          <Send size={18} /> 送出最終判定
+        <button className={finalizeState === "complete" ? "primary-button completed" : "primary-button"} disabled={finalizeState === "loading"} onClick={() => void finalizeDecision()} type="button">
+          <Send size={18} /> {finalizeState === "loading" ? "送出中" : finalizeState === "complete" ? "已送出判定" : "送出最終判定"}
         </button>
       </section>
 
       <section className="scenario-tabs">
         {cases.map((item) => (
-          <button className={item.assessmentId === selectedId ? "selected" : ""} key={item.assessmentId} onClick={() => setSelectedId(item.assessmentId)} type="button">
+          <button aria-pressed={item.assessmentId === selectedId} className={item.assessmentId === selectedId ? "selected" : ""} key={item.assessmentId} onClick={() => setSelectedId(item.assessmentId)} type="button">
             <strong>{item.scenarioName}</strong>
             <span>{item.submission.vehicleId}</span>
           </button>
@@ -182,7 +203,7 @@ export function ReturnReviewPage() {
 
         <section className="assessment-report">
           <div className="report-hero">
-            <RiskMeter score={assessment.riskScore} size={156} />
+            <RiskMeter rawScore={assessment.riskBreakdown.formula?.rawScore} score={assessment.riskScore} size={156} />
             <div>
               <StatusBadge status={assessment.status} />
               <h2>{draftSubmission.vehicleId}｜{draftSubmission.vehicleModel}</h2>

@@ -2,15 +2,17 @@ import type { CSSProperties } from "react";
 
 interface RiskMeterProps {
   score: number;
+  rawScore?: number;
   label?: string;
   size?: number;
 }
 
-export function RiskMeter({ score, label = "總風險分數", size = 148 }: RiskMeterProps) {
+export function RiskMeter({ score, rawScore, label = "總風險分數", size = 148 }: RiskMeterProps) {
   const color = score >= 70 ? "#ef4444" : score >= 50 ? "#f97316" : score >= 30 ? "#facc15" : "#22c55e";
   const radius = 45;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (Math.max(0, Math.min(100, score)) / 100) * circumference;
+  const shouldShowRawScore = typeof rawScore === "number" && rawScore !== score;
   return (
     <div className="risk-meter" style={{ "--risk-color": color, "--risk-size": `${size}px` } as CSSProperties}>
       <div className="risk-ring">
@@ -31,6 +33,7 @@ export function RiskMeter({ score, label = "總風險分數", size = 148 }: Risk
         </div>
       </div>
       <p>{label}</p>
+      {shouldShowRawScore ? <small>原始累積 {rawScore}</small> : null}
     </div>
   );
 }

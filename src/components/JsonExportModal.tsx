@@ -8,6 +8,25 @@ interface JsonExportModalProps {
 
 export function JsonExportModal({ json, onClose }: JsonExportModalProps) {
   const [copied, setCopied] = React.useState(false);
+  const modalRef = React.useRef<HTMLElement | null>(null);
+
+  React.useEffect(() => {
+    const previousActiveElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    modalRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+      previousActiveElement?.focus();
+    };
+  }, [onClose]);
 
   async function copyJson() {
     try {
@@ -30,12 +49,19 @@ export function JsonExportModal({ json, onClose }: JsonExportModalProps) {
   }
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="AI 判讀 JSON">
-      <section className="json-modal">
+    <div className="modal-backdrop" onMouseDown={(event) => event.currentTarget === event.target && onClose()}>
+      <section
+        aria-labelledby="json-modal-title"
+        aria-modal="true"
+        className="json-modal"
+        ref={modalRef}
+        role="dialog"
+        tabIndex={-1}
+      >
         <div className="modal-header">
           <div>
             <p className="eyebrow">Backend-ready payload</p>
-            <h2>AI 判讀 JSON</h2>
+            <h2 id="json-modal-title">AI 判讀 JSON</h2>
           </div>
           <button aria-label="關閉" className="icon-button" onClick={onClose} type="button">
             <X size={18} />
