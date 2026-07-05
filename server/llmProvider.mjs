@@ -79,12 +79,18 @@ export function getLlmProviderConfig() {
 export function getPublicLlmHealthSnapshot(statusOverride) {
   const config = getLlmProviderConfig();
   const status = statusOverride ?? config.status;
+  const configurationState = config.available
+    ? "ready"
+    : Array.isArray(config.missing) && config.missing.length < 3
+      ? "partial"
+      : "missing";
 
   return {
     available: config.available,
     provider: config.provider,
     baseURLConfigured: config.baseURLConfigured,
     model: config.model,
+    configurationState,
     status
   };
 }

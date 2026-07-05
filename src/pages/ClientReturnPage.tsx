@@ -24,6 +24,7 @@ export function ClientReturnPage() {
   const [remoteHints, setRemoteHints] = React.useState<string[]>([]);
   const [photoBatchMessage, setPhotoBatchMessage] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
+  const [workflowNotice, setWorkflowNotice] = React.useState("");
   const preCheck = React.useMemo(() => clientPreCheck(submission), [submission]);
 
   React.useEffect(() => {
@@ -233,7 +234,23 @@ export function ClientReturnPage() {
     }));
   }
 
+  function goToStep(nextStep: number) {
+    setStep(nextStep);
+    setWorkflowNotice(`已切換至「${stepLabels[nextStep]}」`);
+    window.setTimeout(() => setWorkflowNotice(""), 1200);
+  }
+
+  function resetWorkflow() {
+    setSubmission(buildEmptySubmission());
+    setStep(0);
+    setRemoteHints([]);
+    setPhotoBatchMessage("");
+    setWorkflowNotice("流程已重置");
+    window.setTimeout(() => setWorkflowNotice(""), 1400);
+  }
+
   async function submitReturn() {
+    if (submitting) return;
     setSubmitting(true);
     const submitted: ClientReturnSubmission = {
       ...submission,
@@ -258,7 +275,7 @@ export function ClientReturnPage() {
       <section className="mobile-workflow">
         <div className="app-stepper">
           {stepLabels.map((label, index) => (
-            <button className={index === step ? "active" : index < step ? "done" : ""} key={label} onClick={() => setStep(index)} type="button">
+            <button aria-current={index === step ? "step" : undefined} className={index === step ? "active" : index < step ? "done" : ""} key={label} onClick={() => goToStep(index)} type="button">
               <span>{index + 1}</span>
               {label}
             </button>
@@ -339,7 +356,7 @@ export function ClientReturnPage() {
               <label>文字備註<textarea rows={5} value={submission.textNote} onChange={(event) => update("textNote", event.target.value)} placeholder="例如：右側有刮傷，可能原本就有" /></label>
               <div className="quick-note-grid">
                 {quickOptions.map((note) => (
-                  <button className={submission.quickNotes.includes(note) ? "selected" : ""} key={note} onClick={() => toggleQuickNote(note)} type="button">
+                  <button aria-pressed={submission.quickNotes.includes(note)} className={submission.quickNotes.includes(note) ? "selected" : ""} key={note} onClick={() => toggleQuickNote(note)} type="button">
                     {note}
                   </button>
                 ))}
@@ -378,15 +395,16 @@ export function ClientReturnPage() {
           ) : null}
 
           <div className="workflow-actions">
-            <button className="secondary-button" disabled={step === 0} onClick={() => setStep((value) => Math.max(0, value - 1))} type="button">
+            {workflowNotice ? <div className="workflow-notice">{workflowNotice}</div> : null}
+            <button className="secondary-button" disabled={step === 0} onClick={() => goToStep(Math.max(0, step - 1))} type="button">
               <ArrowLeft size={18} /> 返回
             </button>
             {step < 4 ? (
-              <button className="primary-button" onClick={() => setStep((value) => Math.min(4, value + 1))} type="button">
+              <button className="primary-button" onClick={() => goToStep(Math.min(4, step + 1))} type="button">
                 下一步 <ArrowRight size={18} />
               </button>
             ) : (
-              <button className="primary-button" onClick={submitReturn} type="button">
+              <button aria-busy={submitting} className="primary-button" disabled={submitting} onClick={submitReturn} type="button">
                 {submitting ? "送出中" : "送出還車紀錄"} <Send size={18} />
               </button>
             )}
@@ -396,7 +414,7 @@ export function ClientReturnPage() {
         <aside className="client-side-summary">
           <h2>客戶端 AI 提醒</h2>
           {preCheck.hints.map((hint) => <p key={hint}>{hint}</p>)}
-          <button className="secondary-button" onClick={() => setSubmission(buildEmptySubmission())} type="button">
+          <button className="secondary-button" onClick={resetWorkflow} type="button">
             <RotateCcw size={18} /> 重置流程
           </button>
           <button className="secondary-button" onClick={() => update("textNote", "右側有刮傷，可能原本就有")} type="button">

@@ -8,7 +8,7 @@ import { normalizeReturnInput, validateReturnCase } from "./validation";
 export function runAssessment(input: ReturnCase, options: { photoUploaded?: boolean } = {}): AiAssessment {
   const validation = validateReturnCase(input);
   const normalizedInput = normalizeReturnInput(input);
-  const scoreResult = scoreRisk(normalizedInput);
+  const scoreResult = scoreRisk(normalizedInput, { photoUploaded: Boolean(options.photoUploaded) });
   const evidenceCards = buildEvidenceCards(normalizedInput, scoreResult, Boolean(options.photoUploaded));
   const status = decideVehicleStatus(scoreResult, evidenceCards);
   const nextBookingDecision = decideNextBooking(status, scoreResult.breakdown, normalizedInput.nextBookingMinutes);

@@ -16,7 +16,7 @@ import {
   inspectCustomerPhotos,
   inspectPhotoAiSmokeTest
 } from "./photoInspection.mjs";
-import { checkLlmHealth } from "./llmProvider.mjs";
+import { checkLlmHealth, getPublicLlmHealthSnapshot } from "./llmProvider.mjs";
 import { readMultipartForm } from "./multipartForm.mjs";
 
 export async function handleApiRequest(req, res) {
@@ -38,6 +38,9 @@ export async function handleApiRequest(req, res) {
       return sendJson(res, 200, aiHealth());
     }
     if (method === "GET" && pathname === "/api/llm/health") {
+      if (url.searchParams.get("mode") === "config") {
+        return sendJson(res, 200, getPublicLlmHealthSnapshot());
+      }
       return sendJson(res, 200, await checkLlmHealth());
     }
     if (method === "POST" && pathname === "/api/ai/return-precheck") {

@@ -74,6 +74,36 @@ export interface RiskBreakdown {
   energy: number;
   safety: number;
   dispute: number;
+  lineItems?: RiskBreakdownItem[];
+  formula?: RiskScoreFormula;
+  scoreDisclaimer?: string;
+}
+
+export type RiskFormulaComponent =
+  | "baseScore"
+  | "photoRisk"
+  | "noteRisk"
+  | "orderPressureRisk"
+  | "mitigationScore";
+
+export interface RiskBreakdownItem {
+  id: string;
+  label: string;
+  description: string;
+  points: number;
+  component: RiskFormulaComponent;
+  category?: RiskCategory;
+}
+
+export interface RiskScoreFormula {
+  baseScore: number;
+  photoRisk: number;
+  noteRisk: number;
+  orderPressureRisk: number;
+  mitigationScore: number;
+  rawScore: number;
+  finalRisk: number;
+  clamped: boolean;
 }
 
 export interface VoiceKeywordHits {
