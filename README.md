@@ -15,23 +15,6 @@
 - 公司端 `/company/return-review`、`/company/ops-dashboard`、`/company/customer-service`、`/company/work-orders`：共享案件稽核、儀表板、客服摘要與工單
 - 舊路由 `/return-review`、`/ops-dashboard`、`/customer-service` 會 redirect 到公司端新路由
 
-## 初賽報名限制
-
-- 每隊 2-5 人，不開放個人參賽
-- 隊長須具備中華民國國籍
-- 初賽報名與提案上傳截止：2026/10/14 13:00
-- 早鳥團隊資料截止：2026/08/31 13:00
-
-## 待補報名資料
-
-- 隊名
-- 隊長姓名、信箱、電話、身分別與國籍
-- 2-5 位隊員基本資料
-- 是否有未滿 18 歲隊員
-- 指導老師資料，如有
-- 初賽提案 PDF
-- 3 分鐘方案說明影片連結
-
 ## 開發
 
 ```bash
