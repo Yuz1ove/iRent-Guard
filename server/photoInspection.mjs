@@ -1,6 +1,8 @@
 import "./env.mjs";
 import { runVisionJsonCompletion } from "./llmProvider.mjs";
 
+export const CUSTOMER_PHOTO_INSPECTION_FAILURE_MESSAGE = "AI 檢核暫時失敗，請重新上傳或稍後再試";
+
 export const PHOTO_INSPECTION_SYSTEM_PROMPT = `
 你是 iRent Guard 的「車輛照片檢核 AI」。
 
@@ -1118,20 +1120,24 @@ export const PHOTO_AI_SMOKE_TEST_JSON_SCHEMA = {
 
 const EXPECTED_VIEWS = new Set(["front", "rear", "front_or_rear", "any"]);
 const PHOTO_STAGES = new Set(["pickup", "return", "customer_check", "support_claim", "other"]);
+const AI_IMAGE_DATA_URL_PATTERN = /^data:image\/(jpeg|jpg|png);base64,([\s\S]+)$/i;
+const HTTP_IMAGE_URL_PATTERN = /^https?:\/\//i;
+const BARE_BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
 
 export async function inspectCustomerPhotos(input) {
-  assertValidInput(input);
+  const normalizedInput = normalizeCustomerPhotoInspectionInput(input);
+  assertValidInput(normalizedInput);
 
   const completion = await runVisionJsonCompletion({
     instructions: PHOTO_INSPECTION_SYSTEM_PROMPT,
-    content: buildUserContent(input),
+    content: buildUserContent(normalizedInput),
     schema: PHOTO_INSPECTION_JSON_SCHEMA,
     schemaName: "irent_customer_photo_inspection_v1",
     maxOutputTokens: 3000
   });
 
   return finalizePhotoInspectionResult(completion.value, {
-    input,
+    input: normalizedInput,
     model: completion.model,
     source: completion.provider,
     provider: completion.provider,
@@ -1139,6 +1145,16 @@ export async function inspectCustomerPhotos(input) {
     usage: completion.usage,
     fallbackUsed: completion.fallbackUsed
   });
+}
+
+export function getCustomerPhotoInspectionPublicError() {
+  return CUSTOMER_PHOTO_INSPECTION_FAILURE_MESSAGE;
+}
+
+export function describePhotoInspectionError(error) {
+  const statusCode = Number(error?.statusCode ?? error?.status ?? 0) || "unknown";
+  const message = error instanceof Error ? error.message : String(error ?? "Unknown customer photo inspection error");
+  return `status=${statusCode} message=${redactSensitiveValue(message)}`;
 }
 
 export async function inspectPhotoAiSmokeTest({ file, expectedView }) {
@@ -1280,7 +1296,23 @@ function assertValidInput(input) {
   }
 }
 
-export function assertPublicHttpsImageUrl(imageUrl) {
+function normalizeCustomerPhotoInspectionInput(input) {
+  if (!input || typeof input !== "object") return input;
+  if (!Array.isArray(input.photos)) return input;
+
+  return {
+    ...input,
+    photos: input.photos.map((photo) => {
+      if (!photo || typeof photo !== "object") return photo;
+      return {
+        ...photo,
+        imageUrl: typeof photo.imageUrl === "string" ? normalizeAiReadableImageReference(photo.imageUrl, photo.id) : photo.imageUrl
+      };
+    })
+  };
+}
+
+export function assertPublicHttpImageUrl(imageUrl) {
   let url;
 
   try {
@@ -1289,8 +1321,8 @@ export function assertPublicHttpsImageUrl(imageUrl) {
     throw badRequest("Invalid imageUrl");
   }
 
-  if (url.protocol !== "https:") {
-    throw badRequest("AI imageUrl must be HTTPS. Please upload image to storage first.");
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw badRequest("AI imageUrl must be an HTTP(S) URL or a JPEG/PNG data URL.");
   }
 
   const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
@@ -1301,22 +1333,68 @@ export function assertPublicHttpsImageUrl(imageUrl) {
     /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
 
   if (isLocalhost || isPrivateIp) {
-    throw badRequest("AI imageUrl cannot be localhost or private LAN IP. Use public HTTPS signed URL.");
+    throw badRequest("AI imageUrl cannot be localhost or private LAN IP. Use a public HTTP(S) image URL.");
   }
 }
 
 function assertAiReadableImageReference(imageUrl, photoId) {
+  normalizeAiReadableImageReference(imageUrl, photoId);
+}
+
+function normalizeAiReadableImageReference(imageUrl, photoId = "unknown") {
   const trimmed = imageUrl.trim();
 
-  if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(trimmed)) {
-    return;
+  const dataUrlMatch = trimmed.match(AI_IMAGE_DATA_URL_PATTERN);
+  if (dataUrlMatch) {
+    const mimeSubtype = dataUrlMatch[1].toLowerCase() === "jpg" ? "jpeg" : dataUrlMatch[1].toLowerCase();
+    const base64 = normalizeBase64Payload(dataUrlMatch[2], photoId);
+    return `data:image/${mimeSubtype};base64,${base64}`;
   }
 
-  if (/^(blob|file):/i.test(trimmed)) {
-    throw badRequest(`Photo ${photoId} cannot use blob: or file: URLs for AI inspection.`);
+  if (/^data:image\//i.test(trimmed)) {
+    throw badRequest(`Photo ${photoId} must be a JPEG or PNG base64 data URL.`);
   }
 
-  assertPublicHttpsImageUrl(trimmed);
+  if (HTTP_IMAGE_URL_PATTERN.test(trimmed)) {
+    assertPublicHttpImageUrl(trimmed);
+    return trimmed;
+  }
+
+  if (/^blob:/i.test(trimmed)) {
+    throw badRequest(`Photo ${photoId} blob URL must be converted to base64 before AI inspection.`);
+  }
+
+  if (/^file:/i.test(trimmed)) {
+    throw badRequest(`Photo ${photoId} cannot use file URLs for AI inspection.`);
+  }
+
+  if (isLikelyBareBase64Image(trimmed)) {
+    const base64 = normalizeBase64Payload(trimmed, photoId);
+    const mime = detectImageMimeFromBase64(base64) ?? "image/jpeg";
+    return `data:${mime};base64,${base64}`;
+  }
+
+  throw badRequest(`Photo ${photoId} imageUrl must be an HTTP(S) image URL or JPEG/PNG base64 data URL.`);
+}
+
+function normalizeBase64Payload(value, photoId) {
+  const compact = value.replace(/\s/g, "");
+  if (!isLikelyBareBase64Image(compact)) {
+    throw badRequest(`Photo ${photoId} image data is not valid base64.`);
+  }
+
+  return compact;
+}
+
+function isLikelyBareBase64Image(value) {
+  const compact = value.replace(/\s/g, "");
+  return compact.length >= 32 && compact.length % 4 === 0 && BARE_BASE64_PATTERN.test(compact);
+}
+
+function detectImageMimeFromBase64(base64) {
+  if (base64.startsWith("/9j/")) return "image/jpeg";
+  if (base64.startsWith("iVBORw0KGgo")) return "image/png";
+  return null;
 }
 
 function extractOutputText(response) {
@@ -1879,6 +1957,12 @@ function addUnique(array, value) {
 
 function uniqueStrings(items) {
   return Array.from(new Set(items.filter((item) => typeof item === "string" && item.length > 0)));
+}
+
+function redactSensitiveValue(value) {
+  return String(value)
+    .replace(/(sk|sess|rk|aiapi|key|token|api)[A-Za-z0-9_-]{6,}/gi, "$1_...")
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer ...");
 }
 
 function badRequest(message) {

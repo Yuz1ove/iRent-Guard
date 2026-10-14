@@ -1,9 +1,10 @@
 import React from "react";
-import { Check, Clipboard, MessageCircleWarning, RefreshCcw, UserCheck } from "lucide-react";
+import { Camera, Check, Clipboard, ImageIcon, MessageCircleWarning, RefreshCcw, UserCheck } from "lucide-react";
 import { statusLabels } from "../lib/formatters";
 import { useSharedCompanyCases } from "../hooks/useSharedCompanyCases";
 import { patchDemoCase } from "../lib/demoApi";
 import type { CompanyReturnCase } from "../types/company";
+import type { ClientPhoto, ClientPhotoStatus } from "../types/client";
 import { EvidenceCard } from "../components/EvidenceCard";
 import { SupportPhotoInspectionPanel } from "../components/support/SupportPhotoInspectionPanel";
 import { PriorityBadge, StatusBadge } from "../components/StatusBadge";
@@ -18,6 +19,7 @@ export function CustomerServicePage() {
   const [copied, setCopied] = React.useState(false);
   const [manual, setManual] = React.useState(false);
   const [tracked, setTracked] = React.useState(false);
+  const [statusMessage, setStatusMessage] = React.useState("");
   const selected = cases.find((item) => item.assessmentId === selectedId) ?? cases[0];
   const reply = buildReply(selected, mode);
   const disputeLevel = selected.assessment.riskBreakdown.dispute >= 8 ? "高" : selected.assessment.riskBreakdown.dispute >= 4 ? "中" : "低";
@@ -27,6 +29,7 @@ export function CustomerServicePage() {
     setCopied(false);
     setManual(false);
     setTracked(false);
+    setStatusMessage("");
   }, [selectedId]);
 
   React.useEffect(() => {
@@ -43,6 +46,7 @@ export function CustomerServicePage() {
       // Clipboard permission can be unavailable in preview browsers.
     }
     setCopied(true);
+    showStatus("客服建議回覆已複製");
     window.setTimeout(() => setCopied(false), 1500);
   }
 
@@ -52,6 +56,17 @@ export function CustomerServicePage() {
       await patchDemoCase(selected.submission.submissionId, { status: "under_review" });
       await refreshLatestCase();
     }
+    showStatus(manual ? "已取消人工處理標記" : "已標記需人工處理");
+  }
+
+  function chooseMode(nextMode: ReplyMode) {
+    setMode(nextMode);
+    showStatus(nextMode === "soft" ? "已切換為更委婉版本" : nextMode === "short" ? "已切換為更簡短版本" : "已切換為標準版本");
+  }
+
+  function showStatus(message: string) {
+    setStatusMessage(message);
+    window.setTimeout(() => setStatusMessage(""), 1700);
   }
 
   return (
@@ -72,11 +87,12 @@ export function CustomerServicePage() {
               className={item.assessmentId === selectedId ? "selected" : ""}
               key={item.assessmentId}
               onClick={() => setSelectedId(item.assessmentId)}
+              aria-pressed={item.assessmentId === selectedId}
               type="button"
             >
               <strong>{item.submission.orderId}</strong>
               <span>{item.submission.vehicleId}｜{item.scenarioName}</span>
-              <small>問題類型：{item.assessment.evidenceCards[0]?.title ?? "一般回報"}</small>
+              <small>問題類型：{getCaseIssueType(item)}</small>
               <small>最後更新：{new Date(item.auditTrail[item.auditTrail.length - 1].time).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })}</small>
               <div className="support-badges">
                 <StatusBadge status={item.assessment.status} />
@@ -98,6 +114,8 @@ export function CustomerServicePage() {
               <PriorityBadge priority={selected.assessment.dispatchPriority} />
             </div>
           </div>
+
+          <CasePhotoAttachmentPanel photos={selected.submission.photos} />
 
           <div className="support-grid">
             <article className="support-card">
@@ -139,6 +157,7 @@ export function CustomerServicePage() {
               <span className="reply-mode">{mode === "soft" ? "更委婉版本" : mode === "short" ? "更簡短版本" : "標準版本"}</span>
             </div>
             <p>{reply}</p>
+            {statusMessage ? <div className="support-action-status">{statusMessage}</div> : null}
             <div className="button-row">
               <button className="primary-button" onClick={copyReply} type="button">
                 {copied ? <Check size={18} /> : <Clipboard size={18} />}
@@ -147,13 +166,16 @@ export function CustomerServicePage() {
               <button className={manual ? "secondary-button selected" : "secondary-button"} onClick={() => void markManualReview()} type="button">
                 <UserCheck size={18} /> {manual ? "已標記人工" : "標記需人工處理"}
               </button>
-              <button className="secondary-button" onClick={() => setMode("soft")} type="button">
-                <RefreshCcw size={18} /> 產生更委婉版本
+              <button className={mode === "default" ? "secondary-button selected" : "secondary-button"} onClick={() => chooseMode("default")} type="button">
+                <RefreshCcw size={18} /> 標準版本
               </button>
-              <button className="secondary-button" onClick={() => setMode("short")} type="button">
+              <button className={mode === "soft" ? "secondary-button selected" : "secondary-button"} onClick={() => chooseMode("soft")} type="button">
+                <RefreshCcw size={18} /> 更委婉版本
+              </button>
+              <button className={mode === "short" ? "secondary-button selected" : "secondary-button"} onClick={() => chooseMode("short")} type="button">
                 <MessageCircleWarning size={18} /> 產生更簡短版本
               </button>
-              <button className={tracked ? "secondary-button selected" : "secondary-button"} onClick={() => setTracked(true)} type="button">
+              <button className={tracked ? "secondary-button selected" : "secondary-button"} onClick={() => { setTracked(true); showStatus("已建立客服追蹤紀錄"); }} type="button">
                 <Clipboard size={18} /> {tracked ? "已建立追蹤" : "建立客服追蹤紀錄"}
               </button>
             </div>
@@ -161,6 +183,43 @@ export function CustomerServicePage() {
         </section>
       </section>
     </main>
+  );
+}
+
+function CasePhotoAttachmentPanel({ photos }: { photos: ClientPhoto[] }) {
+  const attachedCount = photos.filter((photo) => getPhotoUrl(photo)).length;
+  const visiblePhotos = photos.slice(0, 6);
+
+  return (
+    <article className="support-card case-photo-attachments">
+      <div className="section-heading inline">
+        <div>
+          <p className="eyebrow">照片附件</p>
+          <h3>還車照片附件</h3>
+        </div>
+        <span className="badge neutral">{attachedCount > 0 ? `${attachedCount} 張附圖` : "待附圖"}</span>
+      </div>
+      <div className="case-photo-grid">
+        {visiblePhotos.map((photo) => {
+          const photoUrl = getPhotoUrl(photo);
+          return (
+            <section className="case-photo-card" key={photo.id}>
+              {photoUrl ? (
+                <img alt={photo.label} src={photoUrl} />
+              ) : (
+                <div className="case-photo-placeholder">
+                  <Camera size={22} />
+                </div>
+              )}
+              <div>
+                <strong><ImageIcon size={14} /> {photo.label}</strong>
+                <span className={`badge ${photoStatusBadgeClass(photo.status)}`}>{photoStatusLabel(photo.status)}</span>
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </article>
   );
 }
 
@@ -172,4 +231,45 @@ function buildReply(item: CompanyReturnCase, mode: ReplyMode) {
     return `您好，謝謝您回報訂單 ${item.submission.orderId} 的車況。系統已收到您的還車資料，並依照片、備註、車聯網訊號與歷史紀錄進行初步整理。目前結果僅作為輔助判斷，我們會保留完整紀錄並安排後續確認，避免在資訊不足時直接判定責任。`;
   }
   return item.assessment.customerSummary;
+}
+
+function getCaseIssueType(item: CompanyReturnCase) {
+  const text = [
+    item.scenarioName,
+    item.submission.voiceNote,
+    item.submission.textNote,
+    ...item.submission.quickNotes,
+    ...item.assessment.evidenceCards.map((card) => card.title),
+    ...item.assessment.recommendedActions.map((action) => `${action.label} ${action.description}`)
+  ].join(" ");
+
+  if (item.telematics.tirePressureLow || /胎壓|輪胎|左後輪|右後輪/.test(text)) return "胎壓異常";
+  if (item.telematics.dtcWarning || /故障燈|警示燈|煞車|維修|安全/.test(text)) return "故障燈 / 維修風險";
+  if (/垃圾|髒|汙|污|飲料|杯架|煙味|異味|清潔/.test(text)) return "車內髒污";
+  if (/低電|低油|電量|油量|充電|補電|加油/.test(text)) return "低電量 / 低油量";
+  if (/刮傷|凹陷|保險桿|車門|外觀|損傷|擦撞|掉漆/.test(text)) return "外觀損傷";
+  if (/補拍|缺漏|照片/.test(text) && item.assessment.recommendedActions.some((action) => action.actionType === "retake_photo")) return "照片缺漏 / 需補拍";
+  return item.scenarioName === "正常還車" ? "一般回報" : item.scenarioName;
+}
+
+function getPhotoUrl(photo: ClientPhoto) {
+  return photo.imageUrl ?? photo.previewUrl ?? "";
+}
+
+function photoStatusLabel(status: ClientPhotoStatus) {
+  const labels: Record<ClientPhotoStatus, string> = {
+    missing: "未附圖",
+    uploaded: "已附圖",
+    checking: "AI 檢核中",
+    passed: "已檢核",
+    retake_required: "需補拍"
+  };
+  return labels[status];
+}
+
+function photoStatusBadgeClass(status: ClientPhotoStatus) {
+  if (status === "passed") return "success";
+  if (status === "retake_required" || status === "checking") return "warning";
+  if (status === "uploaded") return "neutral";
+  return "hold";
 }

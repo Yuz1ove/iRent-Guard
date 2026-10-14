@@ -25,6 +25,7 @@ const typeLabels: Record<string, string> = {
 
 export function WorkOrdersPage() {
   const [toast, setToast] = React.useState("");
+  const [lastAction, setLastAction] = React.useState("");
   const { cases, latestCase, lastUpdatedAt, refreshLatestCase } = useSharedCompanyCases();
   const workOrders = cases.flatMap((item) =>
     item.assessment.recommendedActions
@@ -35,6 +36,11 @@ export function WorkOrdersPage() {
   function showToast(message: string) {
     setToast(message);
     window.setTimeout(() => setToast(""), 1600);
+  }
+
+  function markAction(action: string, message: string) {
+    setLastAction(action);
+    showToast(message);
   }
 
   async function updateLatestCaseStatus(status: "work_order_created" | "resolved") {
@@ -55,9 +61,9 @@ export function WorkOrdersPage() {
       </div>
 
       <section className="batch-bar">
-        <button className="secondary-button" onClick={() => showToast(`目前顯示 ${workOrders.length} 筆由 assessment actions 產生的工單`)} type="button"><Filter size={18} /> 全部工單</button>
-        <button className="primary-button" onClick={() => { void updateLatestCaseStatus("work_order_created"); showToast("已將待處理維修工單加入派工佇列"); }} type="button"><Wrench size={18} /> 批次建立維修工單</button>
-        <button className="secondary-button" onClick={() => { void updateLatestCaseStatus("resolved"); showToast("已匯出今日工單與 AI action 對照 JSON"); }} type="button"><CheckCircle2 size={18} /> 匯出今日 AI 判讀紀錄</button>
+        <button className={lastAction === "all" ? "secondary-button selected" : "secondary-button"} onClick={() => markAction("all", `目前顯示 ${workOrders.length} 筆由 assessment actions 產生的工單`)} type="button"><Filter size={18} /> 全部工單</button>
+        <button className={lastAction === "create" ? "primary-button completed" : "primary-button"} onClick={() => { void updateLatestCaseStatus("work_order_created"); markAction("create", "已將待處理維修工單加入派工佇列"); }} type="button"><Wrench size={18} /> 批次建立維修工單</button>
+        <button className={lastAction === "export" ? "secondary-button selected" : "secondary-button"} onClick={() => { void updateLatestCaseStatus("resolved"); markAction("export", "已匯出今日工單與 AI action 對照 JSON"); }} type="button"><CheckCircle2 size={18} /> 匯出今日 AI 判讀紀錄</button>
       </section>
 
       <section className="work-order-table-shell">

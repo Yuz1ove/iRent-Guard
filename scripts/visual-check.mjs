@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { chromium } from "playwright";
 
 const baseUrl = process.env.TEST_URL ?? "http://127.0.0.1:5173";
+const customerPhotoInspectionErrorMessage = "AI 檢核暫時失敗，請重新上傳或稍後再試";
 const browser = await chromium.launch({ headless: true });
 const errors = [];
 
@@ -12,6 +13,149 @@ async function pageWithConsole(viewport) {
   });
   page.on("pageerror", (error) => errors.push(error.message));
   return page;
+}
+
+async function assertNoHorizontalOverflow(page, label) {
+  const metrics = await page.evaluate(() => {
+    const documentElement = document.documentElement;
+    const body = document.body;
+    return {
+      viewportWidth: window.innerWidth,
+      documentScrollWidth: documentElement.scrollWidth,
+      bodyScrollWidth: body.scrollWidth
+    };
+  });
+  const scrollWidth = Math.max(metrics.documentScrollWidth, metrics.bodyScrollWidth);
+  if (scrollWidth > metrics.viewportWidth + 1) {
+    throw new Error(`${label} has horizontal overflow: scrollWidth ${scrollWidth}, viewport ${metrics.viewportWidth}`);
+  }
+}
+
+async function mockPhotoInspectionFailure(page) {
+  await page.route("**/api/customer/photo-inspection", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: false, error: customerPhotoInspectionErrorMessage })
+    });
+  });
+}
+
+async function assertMobileClientReturn(page, width, height, screenshotName) {
+  await mockPhotoInspectionFailure(page);
+
+  await page.goto(`${baseUrl}/client/return`, { waitUntil: "networkidle" });
+  await page.locator(".app-header").waitFor();
+  await assertNoHorizontalOverflow(page, `client return ${width}px initial`);
+
+  const navMetrics = await page.locator(".top-nav").evaluate((element) => {
+    const styles = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return {
+      overflowX: styles.overflowX,
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+      left: rect.left,
+      right: rect.right,
+      viewportWidth: window.innerWidth
+    };
+  });
+  if (!["auto", "scroll"].includes(navMetrics.overflowX)) {
+    throw new Error(`Mobile nav at ${width}px is not horizontally scrollable`);
+  }
+  if (navMetrics.left < -1 || navMetrics.right > navMetrics.viewportWidth + 1) {
+    throw new Error(`Mobile nav at ${width}px escapes viewport bounds`);
+  }
+
+  await page.getByRole("button", { name: /下一步/ }).click();
+  await page.locator(".client-photo-grid").waitFor();
+  await page.locator(".client-photo-tile input").first().setInputFiles(tinyPng);
+  await page.waitForFunction(() => {
+    return Array.from(document.querySelectorAll(".client-photo-tile small")).some((element) => element.textContent?.trim());
+  });
+  await assertNoHorizontalOverflow(page, `client return ${width}px photo step`);
+
+  const layoutMetrics = await page.evaluate(() => {
+    const viewportWidth = window.innerWidth;
+    const page = document.querySelector(".page");
+    const tiles = Array.from(document.querySelectorAll(".client-photo-tile")).map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, width: rect.width };
+    });
+    const images = Array.from(document.querySelectorAll(".client-photo-tile img")).map((element) => {
+      const rect = element.getBoundingClientRect();
+      const parentRect = element.closest(".client-photo-tile")?.getBoundingClientRect();
+      return {
+        left: rect.left,
+        right: rect.right,
+        parentLeft: parentRect?.left ?? 0,
+        parentRight: parentRect?.right ?? 0
+      };
+    });
+    return {
+      viewportWidth,
+      pagePaddingBottom: page ? Number.parseFloat(window.getComputedStyle(page).paddingBottom) : 0,
+      tiles,
+      images
+    };
+  });
+  if (layoutMetrics.pagePaddingBottom < 88) {
+    throw new Error(`Mobile page at ${width}px is missing safe-area bottom padding`);
+  }
+  for (const tile of layoutMetrics.tiles) {
+    if (tile.left < -1 || tile.right > layoutMetrics.viewportWidth + 1 || tile.width > layoutMetrics.viewportWidth + 1) {
+      throw new Error(`Photo tile at ${width}px escapes viewport`);
+    }
+  }
+  for (const image of layoutMetrics.images) {
+    if (image.left < image.parentLeft - 1 || image.right > image.parentRight + 1) {
+      throw new Error(`Photo image at ${width}px escapes its tile`);
+    }
+  }
+
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const bottomMetrics = await page.locator(".workflow-actions").evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { bottom: rect.bottom, viewportHeight: window.innerHeight };
+  });
+  if (bottomMetrics.bottom > bottomMetrics.viewportHeight - 64) {
+    throw new Error(`Bottom workflow content at ${width}px is too close to mobile toolbar area`);
+  }
+
+  await page.screenshot({ path: `output/playwright/${screenshotName}`, fullPage: true });
+  await page.close();
+}
+
+async function assertPhotoInspectionApiDoesNotLeakPattern(page) {
+  const response = await page.request.post(`${baseUrl}/api/customer/photo-inspection`, {
+    data: {
+      caseId: "MOBILE-AI-PATTERN-CHECK",
+      rentalId: "RT-MOBILE-AI-PATTERN-CHECK",
+      userId: "visual-check",
+      expectedVehicle: { plate: "TEST-001", makeModel: "Toyota Altis", color: null },
+      photos: [
+        {
+          id: "photo-front",
+          imageUrl: `data:image/png;base64,${fs.readFileSync(tinyPng).toString("base64")}`,
+          expectedView: "front",
+          stage: "return",
+          capturedAt: new Date().toISOString(),
+          note: "mobile AI image string validation check"
+        }
+      ]
+    }
+  });
+  const payload = await response.json().catch(() => ({}));
+  const payloadText = JSON.stringify(payload);
+  if (response.status() === 400) {
+    throw new Error(`Photo inspection API rejected a valid data URL before provider call: ${payloadText}`);
+  }
+  if (/The string did not match the expected pattern|expected pattern|Zod/i.test(payloadText)) {
+    throw new Error(`Photo inspection API leaked raw image string pattern error: ${payloadText}`);
+  }
+  if (!response.ok() && payload.error !== customerPhotoInspectionErrorMessage) {
+    throw new Error(`Photo inspection API returned non-friendly error: ${payloadText}`);
+  }
 }
 
 const tinyPng = "/tmp/irent-guard-upload.png";
@@ -72,8 +216,12 @@ await desktop.goto(`${baseUrl}/client/return`, { waitUntil: "networkidle" });
 await desktop.getByRole("heading", { name: "確認車輛" }).waitFor();
 await desktop.getByLabel("訂單編號").fill("RT-260629-FINAL");
 await desktop.getByRole("button", { name: /下一步/ }).click();
-await desktop.locator('input[type="file"]').first().setInputFiles(tinyPng);
-await desktop.getByText(/AI 檢查中|照片角度已通過|通過/).first().waitFor();
+await assertPhotoInspectionApiDoesNotLeakPattern(desktop);
+await mockPhotoInspectionFailure(desktop);
+await desktop.locator(".client-photo-tile input").first().setInputFiles(tinyPng);
+await desktop.waitForFunction(() => {
+  return Array.from(document.querySelectorAll(".client-photo-tile small")).some((element) => element.textContent?.trim());
+});
 await desktop.getByRole("button", { name: /返回/ }).click();
 await desktop.locator('input[value="RT-260629-FINAL"]').waitFor();
 await desktop.getByRole("button", { name: /下一步/ }).click();
@@ -174,14 +322,22 @@ await desktop.screenshot({ path: "output/playwright/work-orders-1440.png", fullP
 
 for (const [width, height, route, name] of [
   [1280, 900, "/company/return-review", "company-review-1280.png"],
-  [1024, 900, "/company/ops-dashboard", "ops-1024.png"],
-  [390, 900, "/client/return", "client-return-390.png"]
+  [1024, 900, "/company/ops-dashboard", "ops-1024.png"]
 ]) {
   const page = await pageWithConsole({ width, height });
   await page.goto(`${baseUrl}${route}`, { waitUntil: "networkidle" });
   await page.locator(".app-header").waitFor();
   await page.screenshot({ path: `output/playwright/${name}`, fullPage: true });
   await page.close();
+}
+
+for (const [width, height, name] of [
+  [375, 812, "client-return-375.png"],
+  [390, 844, "client-return-390.png"],
+  [430, 932, "client-return-430.png"]
+]) {
+  const page = await pageWithConsole({ width, height });
+  await assertMobileClientReturn(page, width, height, name);
 }
 
 await browser.close();
